@@ -1,0 +1,16 @@
+:root{--bg:#0b0618;--panel:#160d2b;--line:#2b1d4d;--text:#f6f1ff;--dim:#9b8fc2;--a:#ff3df0;--b:#27e8ff;--warn:#ffd23f;--bad:#ff5c7a;--ok:#5dffb0;
+ --font:ui-rounded,"SF Pro Rounded","Nunito","Trebuchet MS",system-ui,sans-serif}
+[data-theme=sunset]{--bg:#140806;--panel:#26100b;--line:#4a2418;--a:#ff7a3d;--b:#ffd23f;--dim:#c39a88}
+[data-theme=ice]{--bg:#04101a;--panel:#0a1d2c;--line:#173650;--a:#9b8cff;--b:#5cf0ff;--dim:#8aa9c0}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.7em 1em;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--b);outline-offset:2px}
+button.primary{background:linear-gradient(90deg,var(--a),var(--b));color:#10061f;border:0;font-weight:800}
+button.danger{border-color:var(--bad);color:var(--bad)}
+input,textarea,select{width:100%;background:#0f0822;border:1px solid var(--line);border-radius:12px;padding:.75em .9em}
+.dim{color:var(--dim)}.hidden{display:none!important}
+.chip{font-size:.75em;border:1px solid var(--line);border-radius:99px;padding:.15em .6em;color:var(--dim)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}.chip.bad{color:var(--bad);border-color:var(--bad)}.chip.warn{color:var(--warn);border-color:var(--warn)}
+.bar{height:6px;background:var(--line);border-radius:9px;overflow:hidden}.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--a),var(--b));width:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

@@ -1,0 +1,73 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Karaokê</title>
+<link rel="stylesheet" href="/style.css"><style>
+main{max-width:520px;margin:0 auto;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}
+h1{font-size:2rem;margin:.2em 0;letter-spacing:.01em;text-shadow:0 0 18px var(--a)}
+.row{display:flex;gap:8px}.row>*{flex:1}.row>button{flex:0 0 auto}
+.tabs{display:flex;gap:6px;margin:14px 0}.tabs button{flex:1}.tabs button.on{border-color:var(--b);color:var(--b)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;margin:8px 0;display:flex;gap:12px;align-items:center}
+.card img{width:64px;height:48px;object-fit:cover;border-radius:8px;background:var(--line)}
+.card .t{flex:1;min-width:0}.card .t b,.card .t small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card.mine{border-color:var(--a);box-shadow:0 0 14px -6px var(--a)}
+.num{width:2em;text-align:center;font-weight:800;color:var(--b)}
+.sheet{position:fixed;inset:auto 0 0 0;background:var(--panel);border-top:2px solid var(--a);border-radius:22px 22px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));display:grid;gap:10px;max-width:520px;margin:auto;box-shadow:0 -20px 60px #000}
+.toast{position:fixed;top:12px;left:12px;right:12px;max-width:496px;margin:auto;background:var(--panel);border:1px solid var(--b);border-radius:14px;padding:12px 14px;z-index:5}
+.toast.err{border-color:var(--bad)}
+#offline{background:var(--bad);color:#000;text-align:center;padding:4px;font-size:.85em}
+</style></head><body>
+<div id="offline" class="hidden">Reconectando…</div>
+<main>
+ <h1>🎤 Karaokê</h1>
+ <div class="tabs"><button id="tabSearch" class="on">Procurar música</button><button id="tabLink">Colar link</button></div>
+ <form id="searchForm" class="row"><input id="q" placeholder="Música ou artista" enterkeyhint="search" autocomplete="off"><button class="primary">Buscar</button></form>
+ <form id="linkForm" class="row hidden"><input id="url" placeholder="https://youtube.com/watch?v=…" inputmode="url" autocomplete="off"><button class="primary">Abrir</button></form>
+ <div id="results"></div>
+ <h2>Fila atual</h2><div id="queue" class="dim">Ninguém adicionou músicas ainda. Seja o primeiro!</div>
+</main>
+<div id="sheet" class="sheet hidden">
+ <div class="dim" id="sheetHint">Confira os dados (a letra é buscada por título e artista)</div>
+ <input id="fTitle" placeholder="Título" maxlength="120"><input id="fArtist" placeholder="Artista" maxlength="80">
+ <input id="fSinger" placeholder="Quem vai cantar? (opcional)" maxlength="40">
+ <div class="row"><button id="cancel">Cancelar</button><button id="add" class="primary">Adicionar à fila</button></div>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script type="module">
+import { $, el, api, connect, applyTheme, statusLabel } from '/common.js';
+let token = localStorage.getItem('kt'), me = localStorage.getItem('kme'), snap = null, picked = null;
+async function session() { const s = await api('/api/session', { method: 'POST' }); token = s.token; me = s.me; localStorage.setItem('kt', token); localStorage.setItem('kme', me); }
+const toast = (m, err) => { const t = $('#toast'); t.textContent = m; t.className = 'toast' + (err ? ' err' : ''); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.add('hidden'), 3500); };
+const call = async (p, o = {}) => { try { return await api(p, { ...o, token }); } catch (e) { if (e.status === 401) { await session(); return api(p, { ...o, token }); } throw e; } };
+$('#tabSearch').onclick = () => { $('#searchForm').classList.remove('hidden'); $('#linkForm').classList.add('hidden'); $('#tabSearch').classList.add('on'); $('#tabLink').classList.remove('on'); };
+$('#tabLink').onclick = () => { $('#linkForm').classList.remove('hidden'); $('#searchForm').classList.add('hidden'); $('#tabLink').classList.add('on'); $('#tabSearch').classList.remove('on'); };
+$('#searchForm').onsubmit = async (e) => {
+  e.preventDefault(); const r = $('#results'); r.replaceChildren(el('p', { className: 'dim' }, 'Buscando…'));
+  try { const { results } = await call('/api/search?q=' + encodeURIComponent($('#q').value)); r.replaceChildren(...(results.length ? results.map(resultCard) : [el('p', { className: 'dim' }, 'Nada encontrado.')])); }
+  catch (err) { r.replaceChildren(); toast(err.message, true); }
+};
+$('#linkForm').onsubmit = async (e) => { e.preventDefault(); try { const { track } = await call('/api/resolve', { method: 'POST', body: { url: $('#url').value } }); open(track); } catch (err) { toast(err.message, true); } };
+const thumb = (id) => el('img', { src: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`, alt: '', loading: 'lazy' });
+const resultCard = (t) => { const c = el('button', { className: 'card' }, thumb(t.videoId), el('div', { className: 't' }, el('b', {}, t.title), el('small', { className: 'dim' }, t.artist))); c.onclick = () => open(t); return c; };
+function open(t) { picked = t; $('#fTitle').value = t.title; $('#fArtist').value = t.artist; $('#fSinger').value = localStorage.getItem('ksinger') || ''; $('#sheet').classList.remove('hidden'); }
+$('#cancel').onclick = () => $('#sheet').classList.add('hidden');
+$('#add').onclick = async () => {
+  const singer = $('#fSinger').value; localStorage.setItem('ksinger', singer);
+  try {
+    const r = await call('/api/queue', { method: 'POST', body: { ...picked, title: $('#fTitle').value, artist: $('#fArtist').value, singer } });
+    $('#sheet').classList.add('hidden'); $('#results').replaceChildren(); toast(`✓ Adicionada! Você está na posição #${r.position} da fila.`);
+  } catch (err) { toast(err.message, true); }
+};
+function render() {
+  if (!snap) return; applyTheme(snap.settings.theme);
+  const q = $('#queue'); if (!snap.queue.length) return q.replaceChildren('Ninguém adicionou músicas ainda. Seja o primeiro!');
+  q.replaceChildren(...snap.queue.map((s, i) => {
+    const mine = s.ownerTag === me;
+    const info = s.status === 'error' ? s.error : s.status === 'processing' ? `${s.stage} ${s.progress}%` : statusLabel[s.status];
+    const card = el('div', { className: 'card' + (mine ? ' mine' : '') }, el('div', { className: 'num' }, s.status === 'playing' ? '▶' : i + 1),
+      el('div', { className: 't' }, el('b', {}, s.title), el('small', { className: 'dim' }, [s.artist, s.singer && `🎤 ${s.singer}`].filter(Boolean).join(' · ')), el('small', { className: s.status === 'error' ? 'chip bad' : 'dim' }, info)));
+    if (mine && s.status !== 'playing') { const b = el('button', { className: 'danger', ariaLabel: 'Remover', title: 'Remover' }, '✕'); b.onclick = () => call('/api/queue/' + s.id, { method: 'DELETE' }).catch((e) => toast(e.message, true)); card.append(b); }
+    return card;
+  }));
+}
+if (!token) await session();
+connect(token, (m) => { if (m.type === 'STATE') { snap = m.payload; render(); } }, (ok) => $('#offline').classList.toggle('hidden', ok));
+</script></body></html>

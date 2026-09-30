@@ -1,0 +1,88 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Karaokê — Admin</title>
+<link rel="stylesheet" href="/style.css"><style>
+main{max-width:980px;margin:0 auto;padding:16px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+section{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
+h1,h2{margin:.2em 0}.ctl{display:flex;flex-wrap:wrap;gap:8px}.ctl button.on{border-color:var(--b);color:var(--b)}
+.item{display:grid;grid-template-columns:2em 1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.item small{display:block;color:var(--dim)}.item .act{display:flex;gap:4px}.item .act button{padding:.3em .6em}
+label{display:grid;gap:4px;font-size:.9em;color:var(--dim)}form.set{display:grid;gap:10px}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--a);border-radius:16px;width:min(680px,94vw)}
+dialog::backdrop{background:#000a}textarea{min-height:46vh;font-family:ui-monospace,Menlo,monospace;font-size:.9em}
+#login{max-width:340px;margin:20vh auto;display:grid;gap:10px}
+</style></head><body>
+<form id="login"><h1>🎛️ Admin</h1><input id="pw" type="password" placeholder="Senha" autocomplete="current-password"><button class="primary">Entrar</button><small id="err" class="chip bad hidden"></small></form>
+<main id="app" class="hidden">
+ <h1>Karaokê</h1>
+ <div class="ctl" id="status"></div>
+ <div class="grid" style="margin-top:12px">
+  <section><h2>Controles</h2><div class="ctl" id="controls"></div><div id="proc" style="margin-top:12px"></div></section>
+  <section><h2>Configurações</h2><form class="set" id="settings"></form></section>
+ </div>
+ <section style="margin-top:14px"><div class="ctl" style="justify-content:space-between"><h2>Fila</h2><button class="danger" id="clear">Limpar fila</button></div><div id="queue"></div>
+  <form id="manual" class="ctl" style="margin-top:10px"><input id="mu" placeholder="Adicionar manualmente: buscar ou colar link" style="flex:1;min-width:200px"><button class="primary">Adicionar</button></form><div id="mres"></div></section>
+</main>
+<dialog id="lyricDlg"><h2 id="ldTitle"></h2>
+ <div class="ctl"><button id="offM">−0,5 s</button><b id="offV" style="align-self:center">0.0 s</b><button id="offP">+0,5 s</button><span class="dim" style="align-self:center">Deslocamento desta música</span></div>
+ <p class="dim">Uma linha por verso, no formato <code>[mm:ss.xx] texto</code>. Edite os tempos e salve.</p>
+ <textarea id="lrc" spellcheck="false"></textarea>
+ <div class="ctl" style="margin-top:10px"><button class="primary" id="saveLrc">Salvar letra</button><button id="closeDlg">Fechar</button></div></dialog>
+<script type="module">
+import { $, el, api, connect, fmt, applyTheme, statusLabel } from '/common.js';
+let token = sessionStorage.getItem('ka'), snap, dlgSong = null, setBuilt = false;
+const call = (p, o = {}) => api(p, { ...o, token });
+const act = (p, body, method = 'POST') => call(p, { method, body }).catch((e) => alert(e.message));
+$('#login').onsubmit = async (e) => { e.preventDefault(); try { token = (await api('/api/admin/login', { method: 'POST', body: { password: $('#pw').value } })).token; sessionStorage.setItem('ka', token); boot(); } catch (er) { $('#err').textContent = er.message; $('#err').classList.remove('hidden'); } };
+function boot() {
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  connect(token, (m) => { if (m.type === 'STATE') { snap = m.payload; render(); } }, (ok) => { if (!ok) $('#status').replaceChildren(el('span', { className: 'chip bad' }, '● Reconectando…')); });
+}
+const B = (label, fn, cls = '') => { const b = el('button', { className: cls }, label); b.onclick = fn; return b; };
+const ctl = (a) => () => act('/api/admin/control', { action: a });
+function render() {
+  applyTheme(snap.settings.theme);
+  const p = snap.player;
+  $('#status').replaceChildren(el('span', { className: 'chip ok' }, '● Rede: online'), el('span', { className: 'chip' }, `${snap.devices.users} celulares/admin`), el('span', { className: snap.devices.tv ? 'chip ok' : 'chip warn' }, snap.devices.tv ? 'TV conectada' : 'TV desconectada'), el('span', { className: 'chip' }, `Fila: ${snap.queue.length}`), el('span', { className: 'chip' }, snap.net.url));
+  $('#controls').replaceChildren(
+    p.status === 'paused' ? B('▶ Continuar', ctl('resume'), 'primary') : B('⏸ Pausar', ctl('pause')), B('⏭ Pular', ctl('skip')), B('⏮ Do início', ctl('restart')),
+    B('🔁 Repetir', ctl('repeat'), p.repeat ? 'on' : ''), B('🔀 Aleatório', ctl('shuffle'), snap.settings.queueMode === 'shuffle' ? 'on' : ''));
+  const pr = snap.processing;
+  $('#proc').replaceChildren(pr.songId ? el('div', {}, el('small', { className: 'dim' }, `Processando: ${pr.stage} ${pr.progress}%`), el('div', { className: 'bar' }, Object.assign(el('i'), { style: `width:${pr.progress}%` }))) : el('small', { className: 'dim' }, 'Processamento: ocioso'));
+  $('#queue').replaceChildren(...(snap.queue.length ? snap.queue.map((s, i) => {
+    const info = s.status === 'error' ? `Erro: ${s.error}` : s.status === 'processing' ? `${s.stage} ${s.progress}%` : statusLabel[s.status];
+    const a = el('div', { className: 'act' });
+    if (s.status === 'error') a.append(B('↻', () => act('/api/admin/retry/' + s.id), '')); 
+    a.append(B('▲', () => act('/api/admin/move', { id: s.id, index: i - 1 })), B('▼', () => act('/api/admin/move', { id: s.id, index: i + 1 })), B('Letra', () => openLyrics(s)), B('✕', () => act('/api/queue/' + s.id, null, 'DELETE'), 'danger'));
+    return el('div', { className: 'item' }, el('b', {}, s.status === 'playing' ? '▶' : i + 1), el('div', {}, s.title, el('small', {}, [s.artist, s.singer && `🎤 ${s.singer}`, info].filter(Boolean).join(' · '))), a);
+  }) : [el('p', { className: 'dim' }, 'Fila vazia')]));
+  if (!setBuilt) buildSettings();
+}
+const FIELDS = [['maxPerUser', 'Músicas por pessoa', 'number'], ['cooldownSec', 'Intervalo entre adições (s)', 'number'], ['maxDurationSec', 'Duração máxima (s)', 'number'], ['defaultOffset', 'Deslocamento padrão da letra (s)', 'number', 0.1], ['volume', 'Volume (0–1)', 'number', 0.05], ['lyricsSize', 'Tamanho da letra (%)', 'number'], ['animSpeed', 'Velocidade da animação', 'number', 0.25], ['wifiName', 'Nome do Wi-Fi exibido', 'text']];
+function buildSettings() {
+  setBuilt = true; const f = $('#settings'); const s = snap.settings;
+  const inputs = FIELDS.map(([k, label, type, step]) => { const i = el('input', { type, value: s[k], name: k }); if (step) i.step = step; return el('label', {}, label, i); });
+  const sel = (k, label, opts) => { const x = el('select', { name: k }, ...opts.map(([v, t]) => Object.assign(el('option', {}, t), { value: v, selected: s[k] === v }))); return el('label', {}, label, x); };
+  const qr = el('label', {}, 'Mostrar QR Code na TV', Object.assign(el('input', { type: 'checkbox', name: 'showQr', checked: s.showQr }), {}));
+  f.replaceChildren(...inputs, sel('theme', 'Tema visual', [['neon', 'Neon'], ['sunset', 'Pôr do sol'], ['ice', 'Gelo']]), sel('queueMode', 'Modo da fila', [['fifo', 'Em ordem'], ['shuffle', 'Aleatório']]), sel('audioQuality', 'Qualidade do áudio', [['128k', '128 kbps'], ['192k', '192 kbps'], ['256k', '256 kbps']]), qr, B('Salvar configurações', () => {}, 'primary'));
+  f.onsubmit = async (e) => { e.preventDefault(); const body = {}; for (const [k, , type] of FIELDS) { const v = f.elements[k].value; body[k] = type === 'number' ? Number(v) : v; } for (const k of ['theme', 'queueMode', 'audioQuality']) body[k] = f.elements[k].value; body.showQr = f.elements.showQr.checked; await act('/api/admin/settings', body, 'PUT'); };
+}
+async function openLyrics(s) {
+  dlgSong = s; $('#ldTitle').textContent = `${s.title} — ${s.artist}`; $('#offV').textContent = (s.offset || 0).toFixed(1) + ' s';
+  const l = await call(`/api/admin/songs/${s.id}/lyrics`);
+  $('#lrc').value = l.lines.map((x) => `[${String(Math.floor(x.t / 60)).padStart(2, '0')}:${(x.t % 60).toFixed(2).padStart(5, '0')}] ${x.text}`).join('\n');
+  $('#lyricDlg').showModal();
+}
+const nudge = (d) => async () => { const s = snap.queue.find((x) => x.id === dlgSong.id); const v = Math.round(((s?.offset || 0) + d) * 10) / 10; await act(`/api/admin/songs/${dlgSong.id}/offset`, { offset: v }, 'PUT'); $('#offV').textContent = v.toFixed(1) + ' s'; };
+$('#offM').onclick = nudge(-0.5); $('#offP').onclick = nudge(0.5); $('#closeDlg').onclick = () => $('#lyricDlg').close();
+$('#saveLrc').onclick = async () => { await act(`/api/admin/songs/${dlgSong.id}/lyrics`, { lrc: $('#lrc').value }, 'PUT'); $('#lyricDlg').close(); };
+$('#clear').onclick = () => confirm('Limpar toda a fila?') && act('/api/admin/control', { action: 'clear' });
+$('#manual').onsubmit = async (e) => {
+  e.preventDefault(); const v = $('#mu').value.trim(); if (!v) return; const box = $('#mres');
+  try {
+    if (/^https?:/i.test(v)) { const { track } = await call('/api/resolve', { method: 'POST', body: { url: v } }); await call('/api/queue', { method: 'POST', body: { ...track, singer: 'Admin' } }); box.replaceChildren(); $('#mu').value = ''; }
+    else { const { results } = await call('/api/search?q=' + encodeURIComponent(v)); box.replaceChildren(...results.map((t) => B(`${t.artist} — ${t.title}`, async () => { await call('/api/queue', { method: 'POST', body: { ...t, singer: 'Admin' } }); box.replaceChildren(); $('#mu').value = ''; }))); }
+  } catch (er) { alert(er.message); }
+};
+if (token) { try { await call('/api/admin/settings'); boot(); } catch { sessionStorage.removeItem('ka'); token = null; } }
+</script></body></html>

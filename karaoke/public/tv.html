@@ -1,0 +1,123 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Karaokê — TV</title>
+<link rel="stylesheet" href="/style.css"><style>
+html,body{height:100%;overflow:hidden;cursor:none}
+#app{height:100%;display:grid;grid-template-columns:1fr 26vw;grid-template-rows:auto 1fr auto;gap:0 2vw;padding:2.5vh 2.5vw;
+ background:radial-gradient(90vw 60vh at 20% 0%,color-mix(in srgb,var(--a) 22%,transparent),transparent),radial-gradient(70vw 60vh at 100% 100%,color-mix(in srgb,var(--b) 16%,transparent),transparent),var(--bg)}
+header{grid-column:1;display:flex;align-items:baseline;gap:1.5vw;min-width:0}
+header h1{font-size:3.4vmin;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header span{font-size:2.4vmin;color:var(--dim)}
+#stage{grid-column:1;position:relative;overflow:hidden;-webkit-mask-image:linear-gradient(transparent,#000 12%,#000 88%,transparent);mask-image:linear-gradient(transparent,#000 12%,#000 88%,transparent)}
+#lines{position:absolute;left:0;right:0;top:0;transition:transform calc(.5s / var(--speed,1)) cubic-bezier(.2,.7,.2,1)}
+.line{font-size:calc(var(--ls,1) * 5.2vmin);font-weight:800;line-height:1.25;padding:.35em 0;opacity:.32;transform-origin:left center;transition:opacity .4s,transform .4s;transform:scale(.72)}
+.line.cur{opacity:1;transform:scale(1)}.line.nxt{opacity:.6;transform:scale(.8)}
+.w{display:inline-block;margin-right:.28em;--p:0%;color:transparent;-webkit-background-clip:text;background-clip:text;
+ background-image:linear-gradient(90deg,var(--b) var(--p),#fff var(--p));filter:drop-shadow(0 0 .25em color-mix(in srgb,var(--a) 60%,transparent))}
+#nolyrics{position:absolute;inset:0;display:grid;place-content:center;text-align:center;font-size:4vmin;color:var(--dim)}
+aside{grid-column:2;grid-row:1/4;display:flex;flex-direction:column;gap:2vh;min-height:0}
+#cover{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:2vmin;border:2px solid var(--a);box-shadow:0 0 4vmin -1vmin var(--a);background:var(--panel)}
+#next{flex:1;min-height:0;overflow:hidden}#next h3{margin:.2em 0 .5em;font-size:2.4vmin;color:var(--dim)}
+.nq{padding:1vmin 0;border-bottom:1px solid var(--line);font-size:2.4vmin}.nq small{display:block;color:var(--dim)}
+#qrBox{background:#fff;border-radius:2vmin;padding:1.2vmin;align-self:center;width:min(100%,22vmin)}
+#qrBox img{display:block;width:100%}
+#join{text-align:center;font-size:2.1vmin;color:var(--dim)}#join b{color:var(--text);display:block;font-size:2.4vmin}
+footer{grid-column:1}.bar{height:1.2vmin}
+#wait{grid-column:1;grid-row:2;display:grid;place-content:center;text-align:center;gap:2vh}
+#wait h2{font-size:7vmin;margin:0;text-shadow:0 0 3vmin var(--a)}
+#wait .big{background:#fff;border-radius:3vmin;padding:2vmin;width:min(42vmin,100%);margin:auto}#wait .big img{width:100%;display:block}
+#wait p{font-size:3vmin;margin:0;color:var(--dim)}#wait p b{color:var(--b)}
+#gate,#login{position:fixed;inset:0;background:#000d;display:grid;place-content:center;gap:12px;text-align:center;font-size:4vmin;z-index:9;cursor:pointer}
+#login{cursor:auto;font-size:2.5vmin}
+.st{position:fixed;top:1vh;right:1vw;font-size:1.6vmin;color:var(--bad);z-index:3}
+</style></head><body>
+<div id="app" data-mode="wait">
+ <header><h1 id="title"></h1><span id="artist"></span></header>
+ <section id="stage" class="hidden"><div id="lines"></div><div id="nolyrics" class="hidden">♪ Letra não encontrada ♪<br><small>Só o instrumental está tocando</small></div></section>
+ <section id="wait"><h2>Aguardando próxima música</h2>
+  <div class="big"><img id="bigQr" alt="QR Code"></div><p>Conecte-se ao Wi-Fi <b id="wifi"></b> e escaneie o QR Code</p><p id="joinUrl"></p></section>
+ <footer><div class="bar" id="prog"><i></i></div></footer>
+ <aside><img id="cover" class="hidden" alt="">
+  <div id="next"><h3>Próximas</h3><div id="nextList"></div></div>
+  <div id="qrSmall" class="hidden"><div id="qrBox"><img id="smallQr" alt="QR Code"></div><div id="join"><b id="joinUrl2"></b><span id="mdns"></span></div></div></aside>
+</div>
+<div id="conn" class="st hidden">sem conexão com o servidor…</div>
+<div id="gate" class="hidden"><b>🎤 Toque ou pressione uma tecla para iniciar</b><small class="dim">(necessário uma vez por causa do bloqueio de áudio do navegador)</small></div>
+<form id="login" class="hidden"><b>Senha de administrador</b><input id="pw" type="password" autocomplete="current-password"><button class="primary">Entrar</button></form>
+<audio id="audio" preload="auto"></audio>
+<script type="module">
+import { $, el, api, connect, applyTheme } from '/common.js';
+const audio = $('#audio'); let snap, conn, loaded = null, nonce = -1, lyr = null, idx = -2, offset = 0, dur = 0;
+async function tvToken(pw) {
+  let admin; if (pw) admin = (await api('/api/admin/login', { method: 'POST', body: { password: pw } })).token;
+  return (await api('/api/tv-token', { token: admin })).token;
+}
+async function start() {
+  let t; try { t = await tvToken(); } catch { $('#login').classList.remove('hidden'); return; }
+  conn = connect(t, (m) => { if (m.type === 'STATE') { snap = m.payload; render(); } }, (ok) => $('#conn').classList.toggle('hidden', ok));
+}
+$('#login').onsubmit = async (e) => { e.preventDefault(); try { const t = await tvToken($('#pw').value); $('#login').classList.add('hidden'); conn = connect(t, (m) => { if (m.type === 'STATE') { snap = m.payload; render(); } }, (ok) => $('#conn').classList.toggle('hidden', ok)); } catch { $('#pw').value = ''; } };
+const qrUrl = '/api/qr.svg?' + Date.now();
+$('#bigQr').src = qrUrl; $('#smallQr').src = qrUrl;
+const gateOk = () => { $('#gate').classList.add('hidden'); if (snap?.player.status === 'playing') audio.play().catch(() => {}); };
+$('#gate').onclick = gateOk; addEventListener('keydown', gateOk);
+
+function render() {
+  const s = snap.settings; applyTheme(s.theme);
+  document.documentElement.style.setProperty('--ls', s.lyricsSize / 100);
+  document.documentElement.style.setProperty('--speed', s.animSpeed);
+  audio.volume = s.volume; $('#wifi').textContent = s.wifiName;
+  $('#joinUrl').textContent = snap.net.url; $('#joinUrl2').textContent = snap.net.url; $('#mdns').textContent = snap.net.mdns;
+  const cur = snap.queue.find((x) => x.id === snap.player.songId);
+  const others = snap.queue.filter((x) => x !== cur);
+  $('#nextList').replaceChildren(...(others.length ? others.slice(0, 6).map((x) => el('div', { className: 'nq' }, x.title, el('small', {}, [x.artist, x.singer && `🎤 ${x.singer}`].filter(Boolean).join(' · ') + (x.status === 'processing' ? ` · preparando ${x.progress}%` : x.status === 'error' ? ' · erro' : '')))) : [el('small', { className: 'dim' }, 'Fila vazia')]));
+  const playing = !!cur;
+  $('#stage').classList.toggle('hidden', !playing); $('#wait').classList.toggle('hidden', playing);
+  $('#cover').classList.toggle('hidden', !playing);
+  $('#qrSmall').classList.toggle('hidden', !(playing && s.showQr));
+  $('#wait .big').classList.toggle('hidden', !s.showQr);
+  if (!playing) { audio.pause(); loaded = null; $('#title').textContent = ''; $('#artist').textContent = ''; $('#prog i').style.width = '0'; return; }
+  offset = (cur.offset || 0) + s.defaultOffset;
+  $('#title').textContent = cur.title; $('#artist').textContent = [cur.artist, cur.singer && `🎤 ${cur.singer}`].filter(Boolean).join(' · ');
+  $('#cover').src = cur.thumb; dur = cur.duration;
+  if (loaded !== cur.id) loadSong(cur, snap.player.position);
+  else if (nonce !== snap.player.nonce) { audio.currentTime = 0; idx = -2; }
+  nonce = snap.player.nonce;
+  if (snap.player.status === 'paused') audio.pause(); else if (audio.paused && audio.src && $('#gate').classList.contains('hidden')) audio.play().catch(() => {});
+}
+async function loadSong(song, pos) {
+  loaded = song.id; idx = -2; lyr = null;
+  const { lyrics, offset: o } = await fetch('/api/lyrics/' + song.id).then((r) => r.json()).catch(() => ({ lyrics: { lines: [] } }));
+  if (loaded !== song.id) return;
+  buildLyrics(lyrics.lines || []);
+  audio.src = `/media/${song.videoId}.mp3`;
+  audio.onloadedmetadata = () => { if (pos > 1) audio.currentTime = pos; };
+  audio.play().catch(() => $('#gate').classList.remove('hidden'));
+}
+function buildLyrics(lines) {
+  const box = $('#lines'); box.replaceChildren(); $('#nolyrics').classList.toggle('hidden', lines.length > 0);
+  lyr = lines.map((l, i) => {
+    const start = l.t, end = Math.min(lines[i + 1]?.t ?? start + 5, start + 9) - 0.15;
+    const words = l.text.split(/\s+/).filter(Boolean), total = words.reduce((a, w) => a + w.length + 1, 0);
+    let acc = 0; const spans = words.map((w) => { const a = start + ((end - start) * acc) / total; acc += w.length + 1; const b = start + ((end - start) * acc) / total; const sp = el('span', { className: 'w' }, w); return { sp, a, b }; });
+    const div = el('div', { className: 'line' }, ...spans.map((x) => x.sp)); box.append(div);
+    return { start, div, spans };
+  });
+}
+function frame() {
+  requestAnimationFrame(frame);
+  if (!lyr || audio.paused && audio.currentTime === 0) return;
+  const t = audio.currentTime + offset;
+  if (dur) $('#prog i').style.width = Math.min(100, (audio.currentTime / dur) * 100) + '%';
+  let i = -1; for (let k = 0; k < lyr.length; k++) { if (lyr[k].start <= t) i = k; else break; }
+  if (i !== idx) {
+    idx = i;
+    lyr.forEach((l, k) => { l.div.className = 'line' + (k === i ? ' cur' : k === i + 1 ? ' nxt' : ''); if (k !== i) l.spans.forEach((w) => w.sp.style.setProperty('--p', k < i ? '100%' : '0%')); });
+    const target = lyr[Math.max(i, 0)]?.div; if (target) $('#lines').style.transform = `translateY(${$('#stage').clientHeight * 0.34 - target.offsetTop}px)`;
+  }
+  if (i >= 0) for (const w of lyr[i].spans) w.sp.style.setProperty('--p', Math.max(0, Math.min(100, ((t - w.a) / Math.max(w.b - w.a, 0.05)) * 100)) + '%');
+}
+audio.onended = () => conn?.send({ type: 'ENDED', songId: loaded });
+audio.onerror = () => conn?.send({ type: 'ERROR', songId: loaded, message: 'Arquivo de áudio indisponível' });
+setInterval(() => { if (loaded && !audio.paused) conn?.send({ type: 'TIME', songId: loaded, t: audio.currentTime }); }, 2000);
+requestAnimationFrame(frame); start();
+</script></body></html>

@@ -1,0 +1,14 @@
+# Linux (systemd --user): copie para ~/.config/systemd/user/karaoke.service
+# depois: systemctl --user enable --now karaoke   e   loginctl enable-linger $USER
+[Unit]
+Description=Karaoke LAN
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/karaoke
+EnvironmentFile=%h/karaoke/.env
+ExecStart=/usr/bin/npm start
+Restart=always
+
+[Install]
+WantedBy=default.target

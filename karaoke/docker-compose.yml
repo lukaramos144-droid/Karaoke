@@ -1,0 +1,14 @@
+services:
+  karaoke:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      - HOST_IP=${HOST_IP:?defina HOST_IP com o IP do PC na rede, ex.: 192.168.0.20}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - AUDIO_MODE=${AUDIO_MODE:-demucs}
+      - DEMUCS_DEVICE=${DEMUCS_DEVICE:-cpu}
+      - WIFI_NAME=${WIFI_NAME:-CASA-KARAOKE}
+      - DATA_DIR=/data
+    volumes: ["./data:/data"]
+    restart: unless-stopped
+    # Linux: para mDNS (karaoke.local) troque "ports" por:  network_mode: host

@@ -1,0 +1,4 @@
+demucs>=4.0.1
+torch
+torchaudio
+soundfile
